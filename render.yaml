@@ -1,0 +1,18 @@
+# Render Blueprint — https://render.com/docs/infrastructure-as-code
+# After pushing to GitHub: Dashboard → New → Blueprint → select this repo (render.yaml is auto-detected).
+#
+# Or create manually: New → Static Site → same repo, then:
+#   Build Command:  npm run build
+#   Publish directory: dist
+#   Redirects/Rewrites → Rewrite: source /*  →  destination /index.html
+
+services:
+  - type: web
+    name: tutodoc
+    runtime: static
+    buildCommand: npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
