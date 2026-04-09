@@ -1,3 +1,14 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 :root {
   --text: #6b6375;
   --text-h: #08060d;
@@ -11,10 +22,12 @@
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
+  /* Same font stack everywhere (local + hosted) so deploy matches your PC */
+  --sans: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --heading: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
+  /* One base size on all viewports — avoids “phone looks smaller” than desktop devtools */
   font: 18px/145% var(--sans);
   letter-spacing: 0.18px;
   color-scheme: light dark;
@@ -24,10 +37,6 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -51,13 +60,25 @@
   max-width: 42rem;
   width: 100%;
   margin: 0 auto;
+  min-height: 100vh;
+  min-height: 100dvh;
   min-height: 100svh;
   box-sizing: border-box;
-  padding: 0 1rem 5rem;
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  padding-bottom: max(5rem, calc(env(safe-area-inset-bottom, 0px) + 4rem));
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 body {
-  margin: 0;
+  background: var(--bg);
 }
 
 h1,
@@ -172,8 +193,9 @@ p {
 
 .fab {
   position: fixed;
+  z-index: 100;
   right: max(1rem, calc(50% - 21rem));
-  bottom: 1.5rem;
+  bottom: max(1.5rem, calc(env(safe-area-inset-bottom, 0px) + 1rem));
   width: 3.25rem;
   height: 3.25rem;
   border-radius: 50%;
@@ -366,8 +388,13 @@ p {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
-  z-index: 50;
+  padding: max(1rem, env(safe-area-inset-top, 0px))
+    max(1rem, env(safe-area-inset-right, 0px))
+    max(1rem, env(safe-area-inset-bottom, 0px))
+    max(1rem, env(safe-area-inset-left, 0px));
+  z-index: 200;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal {
