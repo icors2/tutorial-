@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   createTutorial,
@@ -6,10 +6,13 @@ import {
   listTutorials,
   type TutorialRecord,
 } from '../db/schema'
+import { importTutorialPackage } from '../services/tutorialPackage'
 
 export function Dashboard() {
   const [tutorials, setTutorials] = useState<TutorialRecord[]>([])
   const [loading, setLoading] = useState(true)
+  const [importBusy, setImportBusy] = useState(false)
+  const importInputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -30,6 +33,23 @@ export function Dashboard() {
   async function handleCreate() {
     const id = await createTutorial('Untitled tutorial')
     void navigate(`/edit/${id}`)
+  }
+
+  async function handleImportPick(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setImportBusy(true)
+    try {
+      const { tutorialId, title: importedTitle } = await importTutorialPackage(file)
+      await load()
+      window.alert(`Imported “${importedTitle}”. Opening editor…`)
+      void navigate(`/edit/${tutorialId}`)
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setImportBusy(false)
+    }
   }
 
   async function handleDelete(e: MouseEvent, id: string) {
@@ -56,6 +76,27 @@ export function Dashboard() {
       <header className="page-header">
         <h1 className="page-header__title">TutoDOC</h1>
         <p className="page-header__subtitle">Tutorial drafts</p>
+        <div className="dashboard__import-row">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="visually-hidden"
+            onChange={(ev) => void handleImportPick(ev)}
+          />
+          <button
+            type="button"
+            className="btn btn--secondary dashboard__import-btn"
+            disabled={importBusy || loading}
+            onClick={() => importInputRef.current?.click()}
+          >
+            {importBusy ? 'Importing…' : 'Import transfer file'}
+          </button>
+          <span className="muted dashboard__import-hint">
+            From phone: open the tutorial → Transfer → Download or Share, then pick that{' '}
+            <code className="dashboard__code">.tutodoc.json</code> here.
+          </span>
+        </div>
       </header>
 
       {loading ? (

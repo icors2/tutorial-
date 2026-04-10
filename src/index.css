@@ -137,6 +137,51 @@ p {
   padding-bottom: 4rem;
 }
 
+.dashboard__import-row {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  max-width: 36rem;
+}
+
+.dashboard__import-hint {
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.dashboard__code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  padding: 0.05em 0.25em;
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--text-h);
+}
+
+.transfer-dialog__copy {
+  font-size: 0.92rem;
+  line-height: 1.45;
+  margin: 0 0 0.5rem;
+  color: var(--text-h);
+}
+
+.transfer-dialog__hint {
+  font-size: 0.85rem;
+  margin: 0 0 1rem;
+  line-height: 1.35;
+}
+
+.transfer-dialog__code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  padding: 0.05em 0.25em;
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--text-h);
+}
+
 .tutorial-list {
   list-style: none;
   margin: 0;

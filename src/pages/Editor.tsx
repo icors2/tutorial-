@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ExportDialog } from '../components/ExportDialog'
+import { TransferDialog } from '../components/TransferDialog'
 import { ImageEditorModal } from '../components/ImageEditorModal'
 import { StepList } from '../components/StepList'
 import { getImage } from '../db/schema'
@@ -21,6 +22,7 @@ export function Editor() {
   const { tutorialId } = useParams<{ tutorialId: string }>()
   const navigate = useNavigate()
   const [exportOpen, setExportOpen] = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
   const [imageEdit, setImageEdit] = useState<ImageEditSession | null>(null)
 
   const {
@@ -117,6 +119,13 @@ export function Editor() {
           ← Back
         </button>
         <div className="editor__toolbar-spacer" />
+        <button
+          type="button"
+          className="btn btn--secondary"
+          onClick={() => setTransferOpen(true)}
+        >
+          Transfer
+        </button>
         <button type="button" className="btn btn--primary" onClick={openExport}>
           Export
         </button>
@@ -158,6 +167,13 @@ export function Editor() {
         onClose={() => setExportOpen(false)}
         tutorialTitle={title.trim() || 'Tutorial'}
         steps={steps}
+      />
+
+      <TransferDialog
+        open={transferOpen}
+        onClose={() => setTransferOpen(false)}
+        tutorialId={tutorialId}
+        tutorialTitle={title.trim() || 'Tutorial'}
       />
 
       <ImageEditorModal
