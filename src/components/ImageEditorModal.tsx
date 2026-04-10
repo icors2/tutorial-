@@ -1,70 +1,66 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Cropper, { type Area } from 'react-easy-crop'
 import 'react-easy-crop/react-easy-crop.css'
+import { paintAnnotationsOnCroppedContext } from '../services/imageEditComposite'
+import type { ImageEditArrow, ImageEditLabel, ImageEditStateV1 } from '../types/imageEdit'
 import { getCroppedCanvas } from '../utils/cropImage'
+
+export type ImageEditorApplyPayload = {
+  compositeBlob: Blob
+  editState: ImageEditStateV1
+}
 
 type BodyProps = {
   imageSrc: string
+  initialEdit: ImageEditStateV1 | null
+  sourceImageId: string
   onClose: () => void
-  onApply: (blob: Blob) => void
+  onApply: (payload: ImageEditorApplyPayload) => void
 }
 
 type Props = {
   open: boolean
-  /** Changes each time the editor opens so inner state remounts cleanly. */
   sessionKey: number
   imageSrc: string
+  initialEdit: ImageEditStateV1 | null
+  sourceImageId: string
   onClose: () => void
-  onApply: (blob: Blob) => void
+  onApply: (payload: ImageEditorApplyPayload) => void
 }
 
-type Phase = 'crop' | 'highlight'
+type Phase = 'crop' | 'annotate'
 
-function compositeHighlightsToBlob(
-  source: HTMLCanvasElement,
-  rects: Area[],
-): Promise<Blob> {
-  const nw = source.width
-  const nh = source.height
-  const out = document.createElement('canvas')
-  out.width = nw
-  out.height = nh
-  const ctx = out.getContext('2d')
-  if (!ctx) return Promise.reject(new Error('No canvas context'))
-  ctx.drawImage(source, 0, 0)
-  const line = Math.max(2, Math.round(Math.min(nw, nh) / 200))
-  ctx.fillStyle = 'rgba(255, 230, 80, 0.38)'
-  ctx.strokeStyle = 'rgba(255, 120, 0, 0.95)'
-  ctx.lineWidth = line
-  for (const r of rects) {
-    const x = Math.max(0, r.x)
-    const y = Math.max(0, r.y)
-    const w = Math.max(0, r.width)
-    const h = Math.max(0, r.height)
-    if (w < 1 || h < 1) continue
-    ctx.fillRect(x, y, w, h)
-    ctx.strokeRect(x + line / 2, y + line / 2, w - line, h - line)
-  }
-  return new Promise((resolve, reject) => {
-    out.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error('Export failed'))),
-      'image/jpeg',
-      0.92,
-    )
-  })
-}
+type AnnotTool = 'highlight' | 'arrow' | 'text'
 
-type HighlightLayerProps = {
+type AnnotateLayerProps = {
   source: HTMLCanvasElement
+  tool: AnnotTool
   highlights: Area[]
-  onChange: (next: Area[]) => void
+  onHighlightsChange: (next: Area[]) => void
+  arrows: ImageEditArrow[]
+  onArrowsChange: (next: ImageEditArrow[]) => void
+  labels: ImageEditLabel[]
+  onLabelsChange: (next: ImageEditLabel[]) => void
 }
 
-function HighlightLayer({ source, highlights, onChange }: HighlightLayerProps) {
+function AnnotateLayer({
+  source,
+  tool,
+  highlights,
+  onHighlightsChange,
+  arrows,
+  onArrowsChange,
+  labels,
+  onLabelsChange,
+}: AnnotateLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const dragRef = useRef<{ sx: number; sy: number; ex: number; ey: number } | null>(
-    null,
-  )
+  const dragRef = useRef<{
+    kind: AnnotTool
+    sx: number
+    sy: number
+    ex: number
+    ey: number
+  } | null>(null)
 
   const nw = source.width
   const nh = source.height
@@ -82,34 +78,54 @@ function HighlightLayer({ source, highlights, onChange }: HighlightLayerProps) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.drawImage(source, 0, 0, nw, nh, 0, 0, dw, dh)
-    ctx.fillStyle = 'rgba(255, 230, 80, 0.35)'
-    ctx.strokeStyle = 'rgba(255, 120, 0, 0.9)'
-    ctx.lineWidth = Math.max(1, Math.round(2 * scale))
-    const drawRect = (r: Area) => {
-      const x = r.x * scale
-      const y = r.y * scale
-      const w = r.width * scale
-      const h = r.height * scale
-      ctx.fillRect(x, y, w, h)
-      ctx.strokeRect(x, y, w, h)
-    }
-    highlights.forEach(drawRect)
-    const drag = dragRef.current
-    if (drag) {
-      const nx0 = drag.sx * scale
-      const ny0 = drag.sy * scale
-      const nx1 = drag.ex * scale
-      const ny1 = drag.ey * scale
-      const x = Math.min(nx0, nx1)
-      const y = Math.min(ny0, ny1)
-      const w = Math.abs(nx1 - nx0)
-      const h = Math.abs(ny1 - ny0)
-      ctx.setLineDash([4, 4])
+    const sc = scale
+    paintAnnotationsOnCroppedContext(
+      ctx,
+      dw,
+      dh,
+      highlights.map((r) => ({
+        x: r.x * sc,
+        y: r.y * sc,
+        width: r.width * sc,
+        height: r.height * sc,
+      })),
+      arrows.map((a) => ({
+        x1: a.x1 * sc,
+        y1: a.y1 * sc,
+        x2: a.x2 * sc,
+        y2: a.y2 * sc,
+      })),
+      labels.map((L) => ({
+        ...L,
+        x: L.x * sc,
+        y: L.y * sc,
+        fontSizePx: L.fontSizePx * sc,
+      })),
+    )
+    const d = dragRef.current
+    if (d) {
+      const x0 = d.sx * sc
+      const y0 = d.sy * sc
+      const x1 = d.ex * sc
+      const y1 = d.ey * sc
       ctx.strokeStyle = 'rgba(0, 120, 255, 0.9)'
-      ctx.strokeRect(x, y, w, h)
+      ctx.lineWidth = 2
+      ctx.setLineDash([4, 4])
+      if (d.kind === 'highlight') {
+        const x = Math.min(x0, x1)
+        const y = Math.min(y0, y1)
+        const w = Math.abs(x1 - x0)
+        const h = Math.abs(y1 - y0)
+        ctx.strokeRect(x, y, w, h)
+      } else if (d.kind === 'arrow') {
+        ctx.beginPath()
+        ctx.moveTo(x0, y0)
+        ctx.lineTo(x1, y1)
+        ctx.stroke()
+      }
       ctx.setLineDash([])
     }
-  }, [source, nw, nh, dw, dh, scale, highlights])
+  }, [source, nw, nh, dw, dh, scale, highlights, arrows, labels])
 
   useEffect(() => {
     redraw()
@@ -129,10 +145,27 @@ function HighlightLayer({ source, highlights, onChange }: HighlightLayerProps) {
     }
   }
 
+  function removeHighlight(i: number) {
+    onHighlightsChange(highlights.filter((_, j) => j !== i))
+  }
+  function removeArrow(i: number) {
+    onArrowsChange(arrows.filter((_, j) => j !== i))
+  }
+  function removeLabel(i: number) {
+    onLabelsChange(labels.filter((_, j) => j !== i))
+  }
+  function editLabel(i: number) {
+    const L = labels[i]
+    const t = window.prompt('Label text', L.text)
+    if (t === null) return
+    onLabelsChange(labels.map((x, j) => (j === i ? { ...x, text: t } : x)))
+  }
+
   return (
-    <div className="image-editor__highlight">
+    <div className="image-editor__annotate">
       <p className="image-editor__hint">
-        Drag on the image to draw highlight rectangles. Undo removes the last one.
+        Highlight: drag a box. Arrow: drag from tail to tip. Text: tap where the label should go. Use
+        the list below to remove or edit labels.
       </p>
       <canvas
         ref={canvasRef}
@@ -141,13 +174,19 @@ function HighlightLayer({ source, highlights, onChange }: HighlightLayerProps) {
         height={dh}
         role="presentation"
         onPointerDown={(e) => {
+          const t = tool
           e.currentTarget.setPointerCapture(e.pointerId)
           const { x, y } = clientToNatural(e.clientX, e.clientY)
-          dragRef.current = { sx: x, sy: y, ex: x, ey: y }
+          if (t === 'text') {
+            dragRef.current = { kind: 'text', sx: x, sy: y, ex: x, ey: y }
+            redraw()
+            return
+          }
+          dragRef.current = { kind: t, sx: x, sy: y, ex: x, ey: y }
           redraw()
         }}
         onPointerMove={(e) => {
-          if (!dragRef.current) return
+          if (!dragRef.current || dragRef.current.kind === 'text') return
           const { x, y } = clientToNatural(e.clientX, e.clientY)
           dragRef.current = { ...dragRef.current, ex: x, ey: y }
           redraw()
@@ -159,14 +198,48 @@ function HighlightLayer({ source, highlights, onChange }: HighlightLayerProps) {
           const { x, y } = clientToNatural(e.clientX, e.clientY)
           const ex = x
           const ey = y
-          const x0 = Math.min(d.sx, ex)
-          const y0 = Math.min(d.sy, ey)
-          const w = Math.abs(ex - d.sx)
-          const h = Math.abs(ey - d.sy)
-          dragRef.current = null
-          redraw()
-          if (w > 4 && h > 4) {
-            onChange([...highlights, { x: x0, y: y0, width: w, height: h }])
+
+          if (d.kind === 'text') {
+            const dist = Math.hypot(ex - d.sx, ey - d.sy)
+            dragRef.current = null
+            redraw()
+            if (dist > 12) return
+            const text = window.prompt('Text on photo', 'Label')
+            if (text === null || !text.trim()) return
+            onLabelsChange([
+              ...labels,
+              {
+                id: crypto.randomUUID(),
+                x: d.sx,
+                y: d.sy,
+                text: text.trim(),
+                fontSizePx: Math.max(14, Math.round(Math.min(nw, nh) / 28)),
+                color: '#ffffff',
+              },
+            ])
+            return
+          }
+
+          if (d.kind === 'highlight') {
+            const x0 = Math.min(d.sx, ex)
+            const y0 = Math.min(d.sy, ey)
+            const w = Math.abs(ex - d.sx)
+            const h = Math.abs(ey - d.sy)
+            dragRef.current = null
+            redraw()
+            if (w > 4 && h > 4) {
+              onHighlightsChange([...highlights, { x: x0, y: y0, width: w, height: h }])
+            }
+            return
+          }
+
+          if (d.kind === 'arrow') {
+            const dist = Math.hypot(ex - d.sx, ey - d.sy)
+            dragRef.current = null
+            redraw()
+            if (dist > 8) {
+              onArrowsChange([...arrows, { x1: d.sx, y1: d.sy, x2: ex, y2: ey }])
+            }
           }
         }}
         onPointerCancel={() => {
@@ -174,38 +247,116 @@ function HighlightLayer({ source, highlights, onChange }: HighlightLayerProps) {
           redraw()
         }}
       />
+
+      <div className="image-editor__layers">
+        <h3 className="image-editor__layers-title">Edits on this photo</h3>
+        {highlights.length === 0 && arrows.length === 0 && labels.length === 0 ? (
+          <p className="image-editor__layers-empty muted">No annotations yet.</p>
+        ) : (
+          <ul className="image-editor__layer-list">
+            {highlights.map((_, i) => (
+              <li key={`h-${i}`}>
+                Highlight {i + 1}
+                <button type="button" className="btn btn--ghost" onClick={() => removeHighlight(i)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+            {arrows.map((_, i) => (
+              <li key={`a-${i}`}>
+                Arrow {i + 1}
+                <button type="button" className="btn btn--ghost" onClick={() => removeArrow(i)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+            {labels.map((L, i) => (
+              <li key={L.id}>
+                Text: “{L.text.length > 24 ? `${L.text.slice(0, 24)}…` : L.text}”
+                <button type="button" className="btn btn--ghost" onClick={() => editLabel(i)}>
+                  Edit
+                </button>
+                <button type="button" className="btn btn--ghost" onClick={() => removeLabel(i)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }
 
-function ImageEditorModalBody({ imageSrc, onClose, onApply }: BodyProps) {
+function ImageEditorModalBody({
+  imageSrc,
+  initialEdit,
+  sourceImageId,
+  onClose,
+  onApply,
+}: BodyProps) {
   const [phase, setPhase] = useState<Phase>('crop')
   const [crop, setCrop] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
   const [croppedPixels, setCroppedPixels] = useState<Area | null>(null)
   const [croppedCanvas, setCroppedCanvas] = useState<HTMLCanvasElement | null>(null)
-  const [highlights, setHighlights] = useState<Area[]>([])
+  const [annotTool, setAnnotTool] = useState<AnnotTool>('highlight')
+  const [highlights, setHighlights] = useState<Area[]>(() => initialEdit?.highlights ?? [])
+  const [arrows, setArrows] = useState<ImageEditArrow[]>(() => initialEdit?.arrows ?? [])
+  const [labels, setLabels] = useState<ImageEditLabel[]>(() => initialEdit?.labels ?? [])
+  const cropKeyRef = useRef<string | null>(null)
 
   const onCropComplete = useCallback((_: Area, pixels: Area) => {
     setCroppedPixels(pixels)
   }, [])
 
-  async function goToHighlights() {
+  async function goToAnnotate() {
     if (!croppedPixels) return
+    const key = JSON.stringify(croppedPixels)
+    const prev = cropKeyRef.current
+    if (prev !== null && prev !== key) {
+      setHighlights([])
+      setArrows([])
+      setLabels([])
+    }
+    cropKeyRef.current = key
     try {
       const canvas = await getCroppedCanvas(imageSrc, croppedPixels)
       setCroppedCanvas(canvas)
-      setPhase('highlight')
+      setPhase('annotate')
     } catch {
       window.alert('Could not crop this image. Try again.')
     }
   }
 
   function handleApply() {
-    const src = croppedCanvas
-    if (!src) return
-    void compositeHighlightsToBlob(src, highlights).then((blob) => {
-      onApply(blob)
+    const base = croppedCanvas
+    if (!base || !croppedPixels) return
+    const w = base.width
+    const h = base.height
+    const out = document.createElement('canvas')
+    out.width = w
+    out.height = h
+    const ctx = out.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(base, 0, 0)
+    paintAnnotationsOnCroppedContext(ctx, w, h, highlights, arrows, labels)
+    void new Promise<Blob>((resolve, reject) => {
+      out.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('Export failed'))),
+        'image/jpeg',
+        0.92,
+      )
+    }).then((compositeBlob) => {
+      const editState: ImageEditStateV1 = {
+        v: 1,
+        originalImageId: initialEdit?.originalImageId ?? sourceImageId,
+        crop: croppedPixels,
+        highlights,
+        arrows,
+        labels,
+      }
+      onApply({ compositeBlob, editState })
       onClose()
     })
   }
@@ -217,91 +368,96 @@ function ImageEditorModalBody({ imageSrc, onClose, onApply }: BodyProps) {
       aria-labelledby="image-editor-title"
       onClick={(e) => e.stopPropagation()}
     >
-        <h2 id="image-editor-title" className="modal__title">
-          {phase === 'crop' ? 'Move & crop' : 'Highlight areas'}
-        </h2>
+      <h2 id="image-editor-title" className="modal__title">
+        {phase === 'crop' ? 'Move & crop' : 'Annotate photo'}
+      </h2>
 
-        {phase === 'crop' ? (
-          <>
-            <div className="image-editor__crop-wrap">
-              <Cropper
-                image={imageSrc}
-                crop={crop}
-                zoom={zoom}
-                aspect={undefined}
-                onCropChange={setCrop}
-                onZoomChange={setZoom}
-                onCropComplete={onCropComplete}
-              />
-            </div>
-            <label className="image-editor__zoom">
-              Zoom
-              <input
-                type="range"
-                min={1}
-                max={3}
-                step={0.05}
-                value={zoom}
-                onChange={(e) => setZoom(Number(e.target.value))}
-              />
-            </label>
-          </>
-        ) : croppedCanvas ? (
-          <HighlightLayer
+      {phase === 'crop' ? (
+        <>
+          <div className="image-editor__crop-wrap">
+            <Cropper
+              image={imageSrc}
+              crop={crop}
+              zoom={zoom}
+              aspect={undefined}
+              rotation={0}
+              onCropChange={setCrop}
+              onZoomChange={setZoom}
+              onCropComplete={onCropComplete}
+              initialCroppedAreaPixels={initialEdit?.crop}
+            />
+          </div>
+          <label className="image-editor__zoom">
+            Zoom
+            <input
+              type="range"
+              min={1}
+              max={3}
+              step={0.05}
+              value={zoom}
+              onChange={(e) => setZoom(Number(e.target.value))}
+            />
+          </label>
+        </>
+      ) : croppedCanvas ? (
+        <>
+          <div className="image-editor__tool-row" role="toolbar" style={{ marginBottom: '0.5rem' }}>
+            <span className="image-editor__tool-label">Tool:</span>
+            {(['highlight', 'arrow', 'text'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`btn btn--secondary image-editor__tool-btn${annotTool === t ? ' is-active' : ''}`}
+                onClick={() => setAnnotTool(t)}
+              >
+                {t === 'highlight' ? 'Highlight' : t === 'arrow' ? 'Arrow' : 'Text on photo'}
+              </button>
+            ))}
+          </div>
+          <AnnotateLayer
             source={croppedCanvas}
+            tool={annotTool}
             highlights={highlights}
-            onChange={setHighlights}
+            onHighlightsChange={setHighlights}
+            arrows={arrows}
+            onArrowsChange={setArrows}
+            labels={labels}
+            onLabelsChange={setLabels}
           />
-        ) : null}
+        </>
+      ) : null}
 
-        <div className="modal__actions image-editor__footer">
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            Cancel
+      <div className="modal__actions image-editor__footer">
+        <button type="button" className="btn btn--ghost" onClick={onClose}>
+          Cancel
+        </button>
+        {phase === 'crop' ? (
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={() => void goToAnnotate()}
+            disabled={!croppedPixels}
+          >
+            Next: annotate
           </button>
-          {phase === 'crop' ? (
+        ) : (
+          <>
             <button
               type="button"
-              className="btn btn--secondary"
-              onClick={() => void goToHighlights()}
-              disabled={!croppedPixels}
+              className="btn btn--ghost"
+              onClick={() => {
+                setPhase('crop')
+                setCroppedCanvas(null)
+              }}
             >
-              Next: highlights
+              Back to crop
             </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => {
-                  setPhase('crop')
-                  setCroppedCanvas(null)
-                  setHighlights([])
-                }}
-              >
-                Back to crop
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => setHighlights((h) => h.slice(0, -1))}
-                disabled={highlights.length === 0}
-              >
-                Undo highlight
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => setHighlights([])}
-                disabled={highlights.length === 0}
-              >
-                Clear highlights
-              </button>
-              <button type="button" className="btn btn--primary" onClick={handleApply}>
-                Apply
-              </button>
-            </>
-          )}
-        </div>
+            <button type="button" className="btn btn--primary" onClick={handleApply}>
+              Apply
+            </button>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -310,6 +466,8 @@ export function ImageEditorModal({
   open,
   sessionKey,
   imageSrc,
+  initialEdit,
+  sourceImageId,
   onClose,
   onApply,
 }: Props) {
@@ -319,6 +477,8 @@ export function ImageEditorModal({
       <ImageEditorModalBody
         key={sessionKey}
         imageSrc={imageSrc}
+        initialEdit={initialEdit}
+        sourceImageId={sourceImageId}
         onClose={onClose}
         onApply={onApply}
       />

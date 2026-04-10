@@ -9,12 +9,14 @@ import {
   persistStepOrder,
   saveImageBlob,
   setStepImage as dbSetStepImage,
+  setStepImageWithEdit,
   updateStepText as dbUpdateStepText,
   updateTutorialTitle,
   type StepRecord,
   type TutorialRecord,
 } from '../db/schema'
 import { processImageBlob } from '../services/images'
+import { stringifyImageEdit, type ImageEditStateV1 } from '../types/imageEdit'
 
 export function useTutorialEditor(tutorialId: string | undefined) {
   const [tutorial, setTutorial] = useState<TutorialRecord | null>(null)
@@ -146,6 +148,28 @@ export function useTutorialEditor(tutorialId: string | undefined) {
     [],
   )
 
+  const attachImageFromEditor = useCallback(
+    async (stepId: string, compositeBlob: Blob, editState: ImageEditStateV1) => {
+      const jpeg = await processImageBlob(compositeBlob)
+      const imageId = await saveImageBlob(jpeg, 'image/jpeg')
+      const json = stringifyImageEdit(editState)
+      await setStepImageWithEdit(stepId, imageId, json)
+      setImagePreviewUrls((prev) => {
+        const old = prev[stepId]
+        if (old) URL.revokeObjectURL(old)
+        const next = { ...prev }
+        next[stepId] = URL.createObjectURL(jpeg)
+        return next
+      })
+      setSteps((prev) =>
+        prev.map((s) =>
+          s.id === stepId ? { ...s, imageId, imageEditJson: json } : s,
+        ),
+      )
+    },
+    [],
+  )
+
   const clearImage = useCallback(
     async (stepId: string) => {
       await dbClearStepImage(stepId)
@@ -158,7 +182,9 @@ export function useTutorialEditor(tutorialId: string | undefined) {
       })
       setSteps((prev) =>
         prev.map((s) =>
-          s.id === stepId ? { ...s, imageId: undefined } : s,
+          s.id === stepId
+            ? { ...s, imageId: undefined, imageEditJson: undefined }
+            : s,
         ),
       )
     },
@@ -188,6 +214,7 @@ export function useTutorialEditor(tutorialId: string | undefined) {
     updateStepText,
     deleteStep,
     attachImageFromBlob,
+    attachImageFromEditor,
     clearImage,
     reorderSteps,
     imagePreviewUrls,

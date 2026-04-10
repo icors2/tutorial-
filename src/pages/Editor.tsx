@@ -3,18 +3,25 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ExportDialog } from '../components/ExportDialog'
 import { ImageEditorModal } from '../components/ImageEditorModal'
 import { StepList } from '../components/StepList'
+import { getImage } from '../db/schema'
 import { useTutorialEditor } from '../hooks/useTutorialEditor'
 import { instructionTextIsMeaningful } from '../services/richText'
+import { parseImageEditJson, type ImageEditStateV1 } from '../types/imageEdit'
+
+type ImageEditSession = {
+  stepId: string
+  key: number
+  imageSrc: string
+  initialEdit: ImageEditStateV1 | null
+  sourceImageId: string
+  revokeOnClose: boolean
+}
 
 export function Editor() {
   const { tutorialId } = useParams<{ tutorialId: string }>()
   const navigate = useNavigate()
   const [exportOpen, setExportOpen] = useState(false)
-  const [imageEdit, setImageEdit] = useState<{
-    stepId: string
-    src: string
-    key: number
-  } | null>(null)
+  const [imageEdit, setImageEdit] = useState<ImageEditSession | null>(null)
 
   const {
     tutorial,
@@ -26,6 +33,7 @@ export function Editor() {
     updateStepText,
     deleteStep,
     attachImageFromBlob,
+    attachImageFromEditor,
     clearImage,
     reorderSteps,
     imagePreviewUrls,
@@ -45,6 +53,40 @@ export function Editor() {
       return
     }
     setExportOpen(true)
+  }
+
+  function closeImageEditor() {
+    setImageEdit((cur) => {
+      if (cur?.revokeOnClose) URL.revokeObjectURL(cur.imageSrc)
+      return null
+    })
+  }
+
+  async function openImageEditor(stepId: string) {
+    const step = steps.find((s) => s.id === stepId)
+    if (!step?.imageId) return
+    const initial = parseImageEditJson(step.imageEditJson)
+    let imageSrc = ''
+    let revokeOnClose = false
+    if (initial?.originalImageId) {
+      const orig = await getImage(initial.originalImageId)
+      if (orig) {
+        imageSrc = URL.createObjectURL(orig.blob)
+        revokeOnClose = true
+      }
+    }
+    if (!imageSrc) {
+      imageSrc = imagePreviewUrls[stepId] ?? ''
+    }
+    if (!imageSrc) return
+    setImageEdit({
+      stepId,
+      key: Date.now(),
+      imageSrc,
+      initialEdit: initial,
+      sourceImageId: step.imageId,
+      revokeOnClose,
+    })
   }
 
   if (!tutorialId) {
@@ -102,10 +144,7 @@ export function Editor() {
         onGalleryFile={(id, file) => void attachImageFromBlob(id, file)}
         onClearImage={(id) => void clearImage(id)}
         onReorder={(ids) => void reorderSteps(ids)}
-        onEditImage={(stepId) => {
-          const src = imagePreviewUrls[stepId]
-          if (src) setImageEdit({ stepId, src, key: Date.now() })
-        }}
+        onEditImage={(stepId) => void openImageEditor(stepId)}
       />
 
       <div className="editor__footer">
@@ -124,10 +163,17 @@ export function Editor() {
       <ImageEditorModal
         open={!!imageEdit}
         sessionKey={imageEdit?.key ?? 0}
-        imageSrc={imageEdit?.src ?? ''}
-        onClose={() => setImageEdit(null)}
-        onApply={(blob) => {
-          if (imageEdit) void attachImageFromBlob(imageEdit.stepId, blob)
+        imageSrc={imageEdit?.imageSrc ?? ''}
+        initialEdit={imageEdit?.initialEdit ?? null}
+        sourceImageId={imageEdit?.sourceImageId ?? ''}
+        onClose={closeImageEditor}
+        onApply={(p) => {
+          const session = imageEdit
+          if (session) {
+            void attachImageFromEditor(session.stepId, p.compositeBlob, p.editState)
+            if (session.revokeOnClose) URL.revokeObjectURL(session.imageSrc)
+            setImageEdit(null)
+          }
         }}
       />
     </div>

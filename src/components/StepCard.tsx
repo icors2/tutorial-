@@ -132,7 +132,7 @@ export function StepCard({
           <>
             {onEditImage ? (
               <button type="button" className="btn btn--secondary" onClick={onEditImage}>
-                Crop &amp; highlight
+                Edit photo
               </button>
             ) : null}
             <button type="button" className="btn btn--ghost" onClick={onClearImage}>

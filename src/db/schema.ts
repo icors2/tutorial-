@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
+import { parseImageEditJson } from '../types/imageEdit'
 
 export interface TutorialRecord {
   id: string
@@ -12,6 +13,8 @@ export interface StepRecord {
   sortOrder: number
   text: string
   imageId?: string
+  /** JSON {@link import('../types/imageEdit').ImageEditStateV1} for re-editing crop/annotations */
+  imageEditJson?: string
 }
 
 export interface StoredImageRecord {
@@ -29,6 +32,11 @@ class TutoDocDB extends Dexie {
   constructor() {
     super('tutodoc')
     this.version(1).stores({
+      tutorials: 'id, updatedAt',
+      steps: 'id, tutorialId, sortOrder, imageId',
+      images: 'id',
+    })
+    this.version(2).stores({
       tutorials: 'id, updatedAt',
       steps: 'id, tutorialId, sortOrder, imageId',
       images: 'id',
@@ -95,8 +103,11 @@ export async function deleteStep(stepId: string): Promise<void> {
   const step = await db.steps.get(stepId)
   if (!step) return
   const imageId = step.imageId
+  const meta = parseImageEditJson(step.imageEditJson)
+  const originalId = meta?.originalImageId
   await db.steps.delete(stepId)
-  if (imageId) await deleteImageIfOrphan(imageId)
+  if (imageId) await deleteImageIfUnreferenced(imageId)
+  if (originalId && originalId !== imageId) await deleteImageIfUnreferenced(originalId)
   await db.tutorials.update(step.tutorialId, { updatedAt: Date.now() })
 }
 
@@ -104,8 +115,33 @@ export async function setStepImage(stepId: string, imageId: string): Promise<voi
   const step = await db.steps.get(stepId)
   if (!step) return
   const old = step.imageId
-  await db.steps.update(stepId, { imageId })
-  if (old && old !== imageId) await deleteImageIfOrphan(old)
+  const oldMeta = parseImageEditJson(step.imageEditJson)
+  const oldOriginal = oldMeta?.originalImageId
+  await db.steps.update(stepId, { imageId, imageEditJson: undefined })
+  if (old && old !== imageId) await deleteImageIfUnreferenced(old)
+  if (oldOriginal && oldOriginal !== imageId && oldOriginal !== old) {
+    await deleteImageIfUnreferenced(oldOriginal)
+  }
+  await db.tutorials.update(step.tutorialId, { updatedAt: Date.now() })
+}
+
+export async function setStepImageWithEdit(
+  stepId: string,
+  imageId: string,
+  imageEditJson: string,
+): Promise<void> {
+  const step = await db.steps.get(stepId)
+  if (!step) return
+  const old = step.imageId
+  const oldMeta = parseImageEditJson(step.imageEditJson)
+  const oldOriginal = oldMeta?.originalImageId
+  await db.steps.update(stepId, { imageId, imageEditJson })
+  if (old && old !== imageId) await deleteImageIfUnreferenced(old)
+  if (oldOriginal) {
+    const newMeta = parseImageEditJson(imageEditJson)
+    const newOriginal = newMeta?.originalImageId
+    if (oldOriginal !== newOriginal) await deleteImageIfUnreferenced(oldOriginal)
+  }
   await db.tutorials.update(step.tutorialId, { updatedAt: Date.now() })
 }
 
@@ -113,6 +149,8 @@ export async function clearStepImage(stepId: string): Promise<void> {
   const step = await db.steps.get(stepId)
   if (!step) return
   const old = step.imageId
+  const meta = parseImageEditJson(step.imageEditJson)
+  const originalId = meta?.originalImageId
   const next: StepRecord = {
     id: step.id,
     tutorialId: step.tutorialId,
@@ -120,7 +158,8 @@ export async function clearStepImage(stepId: string): Promise<void> {
     text: step.text,
   }
   await db.steps.put(next)
-  if (old) await deleteImageIfOrphan(old)
+  if (old) await deleteImageIfUnreferenced(old)
+  if (originalId && originalId !== old) await deleteImageIfUnreferenced(originalId)
   await db.tutorials.update(step.tutorialId, { updatedAt: Date.now() })
 }
 
@@ -134,9 +173,16 @@ export async function getImage(id: string): Promise<StoredImageRecord | undefine
   return db.images.get(id)
 }
 
-async function deleteImageIfOrphan(imageId: string): Promise<void> {
-  const count = await db.steps.where('imageId').equals(imageId).count()
-  if (count === 0) await db.images.delete(imageId)
+/** Delete blob only if no step uses it as composite or as edit-original. */
+export async function deleteImageIfUnreferenced(imageId: string): Promise<void> {
+  const asComposite = await db.steps.where('imageId').equals(imageId).count()
+  if (asComposite > 0) return
+  const steps = await db.steps.toArray()
+  for (const s of steps) {
+    const st = parseImageEditJson(s.imageEditJson)
+    if (st?.originalImageId === imageId) return
+  }
+  await db.images.delete(imageId)
 }
 
 export async function persistStepOrder(
