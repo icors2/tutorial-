@@ -453,6 +453,214 @@ p {
   overflow-y: auto;
 }
 
+.export-dialog--visual.modal--wide {
+  max-width: min(52rem, 98vw);
+}
+
+.export-dialog__note {
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0;
+  line-height: 1.35;
+}
+
+.export-dialog__visual-panel {
+  margin-bottom: 1rem;
+}
+
+.export-dialog__visual-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+}
+
+.export-dialog__range--compact {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.25rem 0.5rem;
+  align-items: center;
+  font-size: 0.82rem;
+  margin: 0;
+  min-width: 9rem;
+}
+
+.export-dialog__range--compact input[type='range'] {
+  grid-column: 1 / -1;
+}
+
+/* ——— Visual PDF canvas (drag / resize) ——— */
+
+.visual-export__hint {
+  font-size: 0.88rem;
+  margin: 0 0 0.65rem;
+  line-height: 1.35;
+}
+
+.visual-export__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.visual-export__meta {
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.visual-export__scroll {
+  max-height: min(55vh, 32rem);
+  overflow: auto;
+  padding: 0.25rem;
+  border-radius: 10px;
+  background: var(--social-bg);
+  border: 1px solid var(--border);
+}
+
+.visual-export__page-slot {
+  margin-bottom: 1rem;
+}
+
+.visual-export__page-slot:last-child {
+  margin-bottom: 0;
+}
+
+.visual-export__page-label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: 0.35rem;
+}
+
+.visual-export-page {
+  position: relative;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  flex-shrink: 0;
+}
+
+/* During PDF capture: hide editor UI (handles, page dropdown bar) */
+.visual-export-page--capturing .visual-export-block__chrome {
+  display: none;
+}
+
+.visual-export-page--capturing .react-resizable-handle,
+.visual-export-page--capturing .react-resizable-handle * {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
+.visual-export-page--capturing .visual-export-block {
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+.visual-export-rnd {
+  display: flex !important;
+}
+
+.visual-export-block {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  border: 2px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.visual-export-block__chrome {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.2rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--code-bg);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.visual-export-block__page {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-h);
+}
+
+.visual-export-block__page select {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.visual-export-block__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+}
+
+.visual-export-block__title {
+  margin: 0;
+  line-height: 1.2;
+  color: var(--text-h);
+  word-break: break-word;
+}
+
+.visual-export-step__heading {
+  margin: 0 0 0.35rem;
+  line-height: 1.2;
+  color: var(--text-h);
+}
+
+.visual-export-step__img-wrap {
+  margin: 0 0 0.35rem;
+  max-height: 45%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.visual-export-step__img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  vertical-align: middle;
+}
+
+.visual-export-step__html {
+  line-height: 1.35;
+  color: var(--text-h);
+  word-break: break-word;
+}
+
+.visual-export-step__html p {
+  margin: 0 0 0.35em;
+}
+
+.visual-export-step__html p:last-child {
+  margin-bottom: 0;
+}
+
 .export-dialog__fieldset {
   border: 1px solid var(--border);
   border-radius: 8px;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { StepRecord } from '../db/schema'
 import {
   buildTutorialDocx,
@@ -6,6 +6,7 @@ import {
   saveExportBlob,
 } from '../services/exportDocx'
 import { buildTutorialPdf } from '../services/exportPdf'
+import { rasterizeVisualPagesToPdf } from '../services/visualExportPdf'
 import {
   buildExportMailtoUrl,
   exportMimeForFilename,
@@ -16,6 +17,11 @@ import {
   clampImageScalePct,
   DEFAULT_EXPORT_LAYOUT,
 } from '../types/exportLayout'
+import {
+  createDefaultVisualBlocks,
+  type VisualExportBlock,
+} from '../types/visualExportLayout'
+import { VisualExportCanvas, type VisualExportCanvasHandle } from './VisualExportCanvas'
 
 type Props = {
   open: boolean
@@ -23,6 +29,8 @@ type Props = {
   tutorialTitle: string
   steps: StepRecord[]
 }
+
+type ExportMode = 'quick' | 'visual'
 
 function ensureExportFilename(
   name: string,
@@ -36,6 +44,11 @@ function ensureExportFilename(
 }
 
 export function ExportDialog({ open, onClose, tutorialTitle, steps }: Props) {
+  const [exportMode, setExportMode] = useState<ExportMode>('quick')
+  const visualRef = useRef<VisualExportCanvasHandle>(null)
+  const [visualBlocks, setVisualBlocks] = useState<VisualExportBlock[]>([])
+  const [visualPageCount, setVisualPageCount] = useState(1)
+
   const [format, setFormat] = useState<ExportFormat>('docx')
   const [layout, setLayout] = useState<TutorialExportLayout>(() => ({
     ...DEFAULT_EXPORT_LAYOUT,
@@ -52,6 +65,9 @@ export function ExportDialog({ open, onClose, tutorialTitle, steps }: Props) {
 
   useEffect(() => {
     if (open) {
+      setExportMode('quick')
+      setVisualBlocks([])
+      setVisualPageCount(1)
       setFormat('docx')
       setLayout({ ...DEFAULT_EXPORT_LAYOUT })
       setPerStepImagePct({})
@@ -70,9 +86,39 @@ export function ExportDialog({ open, onClose, tutorialTitle, steps }: Props) {
     })
   }
 
+  function switchToVisualMode() {
+    setExportMode('visual')
+    setFormat('pdf')
+    setFilename((prev) => {
+      const base = prev.replace(/\.(docx|pdf)$/i, '').trim()
+      if (!base) return defaultExportFilename(tutorialTitle, 'pdf')
+      return `${base}.pdf`
+    })
+    const { blocks, pageCount } = createDefaultVisualBlocks(steps, layout.pdfPageSize)
+    setVisualBlocks(blocks)
+    setVisualPageCount(pageCount)
+  }
+
+  function switchToQuickMode() {
+    setExportMode('quick')
+  }
+
+  function handleVisualPageSizeChange(next: 'a4' | 'letter') {
+    if (next === layout.pdfPageSize) return
+    const ok = window.confirm(
+      'Changing page size resets the visual canvas to a default layout. Continue?',
+    )
+    if (!ok) return
+    setLayout((L) => ({ ...L, pdfPageSize: next }))
+    const { blocks, pageCount } = createDefaultVisualBlocks(steps, next)
+    setVisualBlocks(blocks)
+    setVisualPageCount(pageCount)
+  }
+
   if (!open) return null
 
-  const exportName = ensureExportFilename(filename, tutorialTitle, format)
+  const effectiveFormat: ExportFormat = exportMode === 'visual' ? 'pdf' : format
+  const exportName = ensureExportFilename(filename, tutorialTitle, effectiveFormat)
   const exportMime = exportMimeForFilename(exportName)
   const canUseShare =
     typeof navigator !== 'undefined' && typeof navigator.share === 'function'
@@ -82,13 +128,18 @@ export function ExportDialog({ open, onClose, tutorialTitle, steps }: Props) {
     setBusy(true)
     setLastBlob(null)
     try {
-      const blob =
-        format === 'pdf'
-          ? await buildTutorialPdf(tutorialTitle, steps, layout, perStepImagePct)
-          : await buildTutorialDocx(tutorialTitle, steps, layout, perStepImagePct)
+      let blob: Blob
+      if (exportMode === 'visual') {
+        const els = visualRef.current?.getPageElements() ?? []
+        blob = await rasterizeVisualPagesToPdf(els, layout.pdfPageSize)
+      } else {
+        blob =
+          format === 'pdf'
+            ? await buildTutorialPdf(tutorialTitle, steps, layout, perStepImagePct)
+            : await buildTutorialDocx(tutorialTitle, steps, layout, perStepImagePct)
+      }
       setLastBlob(blob)
-      const name = exportName
-      await saveExportBlob(blob, name, format)
+      await saveExportBlob(blob, exportName, effectiveFormat)
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') {
         setBusy(false)
@@ -120,7 +171,9 @@ export function ExportDialog({ open, onClose, tutorialTitle, steps }: Props) {
   }
 
   function handleEmail() {
-    const name = lastBlob ? exportName : defaultExportFilename(tutorialTitle, format)
+    const name = lastBlob
+      ? exportName
+      : defaultExportFilename(tutorialTitle, effectiveFormat)
     const subject = `Tutorial: ${tutorialTitle}`
     const body = lastBlob
       ? `I exported this tutorial from TutoDOC.\n\nAttach the file:\n${name}\n\n(If the file is not attached, export again from the app and attach it from your Downloads or Files folder.)`
@@ -131,7 +184,7 @@ export function ExportDialog({ open, onClose, tutorialTitle, steps }: Props) {
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
-        className="modal modal--wide export-dialog"
+        className={`modal modal--wide export-dialog${exportMode === 'visual' ? ' export-dialog--visual' : ''}`}
         role="dialog"
         aria-labelledby="export-title"
         onClick={(e) => e.stopPropagation()}
@@ -139,6 +192,38 @@ export function ExportDialog({ open, onClose, tutorialTitle, steps }: Props) {
         <h2 id="export-title" className="modal__title">
           Export tutorial
         </h2>
+
+        <fieldset className="export-dialog__fieldset">
+          <legend className="export-dialog__legend">Export style</legend>
+          <div className="export-dialog__format-row">
+            <label className="export-dialog__radio">
+              <input
+                type="radio"
+                name="export-style"
+                checked={exportMode === 'quick'}
+                onChange={() => switchToQuickMode()}
+                disabled={busy}
+              />
+              Quick (structured Word or PDF)
+            </label>
+            <label className="export-dialog__radio">
+              <input
+                type="radio"
+                name="export-style"
+                checked={exportMode === 'visual'}
+                onChange={() => switchToVisualMode()}
+                disabled={busy}
+              />
+              Visual page designer (drag &amp; resize, PDF)
+            </label>
+          </div>
+          {exportMode === 'visual' ? (
+            <p className="export-dialog__note muted">
+              Arrange title and steps on page-sized artboards. Export rasterizes what you see into a
+              PDF. Word is not available for this mode.
+            </p>
+          ) : null}
+        </fieldset>
 
         <fieldset className="export-dialog__fieldset">
           <legend className="export-dialog__legend">Format</legend>
@@ -149,7 +234,7 @@ export function ExportDialog({ open, onClose, tutorialTitle, steps }: Props) {
                 name="export-format"
                 checked={format === 'docx'}
                 onChange={() => setFormatAndExtension('docx')}
-                disabled={busy}
+                disabled={busy || exportMode === 'visual'}
               />
               Word (.docx)
             </label>
@@ -166,209 +251,300 @@ export function ExportDialog({ open, onClose, tutorialTitle, steps }: Props) {
           </div>
         </fieldset>
 
-        <details className="export-dialog__details" open>
-          <summary className="export-dialog__summary">Layout &amp; sizing</summary>
-          <div className="export-dialog__layout-grid">
-            <label className="modal__field export-dialog__range">
-              Max image width (Word, px)
-              <input
-                type="range"
-                min={240}
-                max={900}
-                step={10}
-                value={layout.docImageMaxWidthPx}
-                onChange={(e) =>
-                  setLayout((L) => ({
-                    ...L,
-                    docImageMaxWidthPx: Number(e.target.value),
-                  }))
-                }
-                disabled={busy}
-              />
-              <span>{layout.docImageMaxWidthPx}px</span>
-            </label>
-            <label className="modal__field export-dialog__range">
-              Max image width (PDF, pt)
-              <input
-                type="range"
-                min={200}
-                max={520}
-                step={10}
-                value={layout.pdfImageMaxWidthPt}
-                onChange={(e) =>
-                  setLayout((L) => ({
-                    ...L,
-                    pdfImageMaxWidthPt: Number(e.target.value),
-                  }))
-                }
-                disabled={busy}
-              />
-              <span>{layout.pdfImageMaxWidthPt}pt</span>
-            </label>
-            <label className="modal__field export-dialog__range">
-              Word body text (half-points)
-              <input
-                type="range"
-                min={18}
-                max={40}
-                step={1}
-                value={layout.docBodyHalfPoints}
-                onChange={(e) =>
-                  setLayout((L) => ({
-                    ...L,
-                    docBodyHalfPoints: Number(e.target.value),
-                  }))
-                }
-                disabled={busy}
-              />
-              <span>{layout.docBodyHalfPoints} ({layout.docBodyHalfPoints / 2}pt)</span>
-            </label>
-            <fieldset className="export-dialog__fieldset export-dialog__fieldset--inline">
-              <legend className="export-dialog__legend">Each step</legend>
-              <label className="export-dialog__radio">
+        {exportMode === 'visual' ? (
+          <div className="export-dialog__visual-panel">
+            <div className="export-dialog__visual-toolbar">
+              <label className="modal__field" style={{ marginBottom: 0 }}>
+                Page size (resets layout)
+                <select
+                  className="modal__input"
+                  value={layout.pdfPageSize}
+                  onChange={(e) =>
+                    handleVisualPageSizeChange(e.target.value as 'a4' | 'letter')
+                  }
+                  disabled={busy}
+                >
+                  <option value="a4">A4</option>
+                  <option value="letter">US Letter</option>
+                </select>
+              </label>
+              <label className="export-dialog__range export-dialog__range--compact">
+                Title
                 <input
-                  type="radio"
-                  name="step-order"
-                  checked={layout.stepContentOrder === 'image-first'}
-                  onChange={() =>
-                    setLayout((L) => ({ ...L, stepContentOrder: 'image-first' }))
+                  type="range"
+                  min={14}
+                  max={28}
+                  step={1}
+                  value={layout.pdfTitleFontPt}
+                  onChange={(e) =>
+                    setLayout((L) => ({
+                      ...L,
+                      pdfTitleFontPt: Number(e.target.value),
+                    }))
                   }
                   disabled={busy}
                 />
-                Image first, then instructions
+                <span>{layout.pdfTitleFontPt}pt</span>
               </label>
-              <label className="export-dialog__radio">
+              <label className="export-dialog__range export-dialog__range--compact">
+                Step
                 <input
-                  type="radio"
-                  name="step-order"
-                  checked={layout.stepContentOrder === 'text-first'}
-                  onChange={() =>
-                    setLayout((L) => ({ ...L, stepContentOrder: 'text-first' }))
+                  type="range"
+                  min={11}
+                  max={22}
+                  step={1}
+                  value={layout.pdfStepHeadingFontPt}
+                  onChange={(e) =>
+                    setLayout((L) => ({
+                      ...L,
+                      pdfStepHeadingFontPt: Number(e.target.value),
+                    }))
                   }
                   disabled={busy}
                 />
-                Instructions first, then image
+                <span>{layout.pdfStepHeadingFontPt}pt</span>
               </label>
-            </fieldset>
-            <label className="modal__field">
-              PDF page size
-              <select
-                className="modal__input"
-                value={layout.pdfPageSize}
-                onChange={(e) =>
-                  setLayout((L) => ({
-                    ...L,
-                    pdfPageSize: e.target.value as 'a4' | 'letter',
-                  }))
-                }
-                disabled={busy}
-              >
-                <option value="a4">A4</option>
-                <option value="letter">US Letter</option>
-              </select>
-            </label>
-            <label className="modal__field export-dialog__range">
-              PDF margins (pt)
-              <input
-                type="range"
-                min={36}
-                max={72}
-                step={2}
-                value={layout.pdfMarginPt}
-                onChange={(e) =>
-                  setLayout((L) => ({ ...L, pdfMarginPt: Number(e.target.value) }))
-                }
-                disabled={busy}
-              />
-              <span>{layout.pdfMarginPt}pt</span>
-            </label>
-            <label className="modal__field export-dialog__range">
-              PDF title (pt)
-              <input
-                type="range"
-                min={14}
-                max={28}
-                step={1}
-                value={layout.pdfTitleFontPt}
-                onChange={(e) =>
-                  setLayout((L) => ({
-                    ...L,
-                    pdfTitleFontPt: Number(e.target.value),
-                  }))
-                }
-                disabled={busy}
-              />
-              <span>{layout.pdfTitleFontPt}pt</span>
-            </label>
-            <label className="modal__field export-dialog__range">
-              PDF step heading (pt)
-              <input
-                type="range"
-                min={11}
-                max={22}
-                step={1}
-                value={layout.pdfStepHeadingFontPt}
-                onChange={(e) =>
-                  setLayout((L) => ({
-                    ...L,
-                    pdfStepHeadingFontPt: Number(e.target.value),
-                  }))
-                }
-                disabled={busy}
-              />
-              <span>{layout.pdfStepHeadingFontPt}pt</span>
-            </label>
-            <label className="modal__field export-dialog__range">
-              PDF body (pt)
-              <input
-                type="range"
-                min={9}
-                max={16}
-                step={1}
-                value={layout.pdfBodyFontPt}
-                onChange={(e) =>
-                  setLayout((L) => ({ ...L, pdfBodyFontPt: Number(e.target.value) }))
-                }
-                disabled={busy}
-              />
-              <span>{layout.pdfBodyFontPt}pt</span>
-            </label>
-          </div>
-
-          {steps.length > 0 ? (
-            <div className="export-dialog__per-step">
-              <p className="export-dialog__per-step-title">Image size per step</p>
-              <p className="muted export-dialog__hint">
-                Percent of the max width above (steps without images are ignored).
-              </p>
-              <ul className="export-dialog__per-step-list">
-                {steps.map((s, i) => (
-                  <li key={s.id}>
-                    <span className="export-dialog__per-step-label">
-                      Step {i + 1}
-                      {s.imageId ? '' : ' (no image)'}
-                    </span>
-                    <input
-                      type="range"
-                      min={25}
-                      max={100}
-                      step={5}
-                      disabled={busy || !s.imageId}
-                      value={clampImageScalePct(perStepImagePct[s.id] ?? 100)}
-                      onChange={(e) =>
-                        setPerStepImagePct((prev) => ({
-                          ...prev,
-                          [s.id]: clampImageScalePct(Number(e.target.value)),
-                        }))
-                      }
-                    />
-                    <span>{clampImageScalePct(perStepImagePct[s.id] ?? 100)}%</span>
-                  </li>
-                ))}
-              </ul>
+              <label className="export-dialog__range export-dialog__range--compact">
+                Body
+                <input
+                  type="range"
+                  min={9}
+                  max={16}
+                  step={1}
+                  value={layout.pdfBodyFontPt}
+                  onChange={(e) =>
+                    setLayout((L) => ({ ...L, pdfBodyFontPt: Number(e.target.value) }))
+                  }
+                  disabled={busy}
+                />
+                <span>{layout.pdfBodyFontPt}pt</span>
+              </label>
             </div>
-          ) : null}
-        </details>
+            <VisualExportCanvas
+              ref={visualRef}
+              tutorialTitle={tutorialTitle}
+              steps={steps}
+              pageSize={layout.pdfPageSize}
+              fontPts={{
+                title: layout.pdfTitleFontPt,
+                step: layout.pdfStepHeadingFontPt,
+                body: layout.pdfBodyFontPt,
+              }}
+              blocks={visualBlocks}
+              setBlocks={setVisualBlocks}
+              pageCount={visualPageCount}
+              setPageCount={setVisualPageCount}
+            />
+          </div>
+        ) : null}
+
+        {exportMode === 'quick' ? (
+          <details className="export-dialog__details" open>
+            <summary className="export-dialog__summary">Layout &amp; sizing</summary>
+            <div className="export-dialog__layout-grid">
+              <label className="modal__field export-dialog__range">
+                Max image width (Word, px)
+                <input
+                  type="range"
+                  min={240}
+                  max={900}
+                  step={10}
+                  value={layout.docImageMaxWidthPx}
+                  onChange={(e) =>
+                    setLayout((L) => ({
+                      ...L,
+                      docImageMaxWidthPx: Number(e.target.value),
+                    }))
+                  }
+                  disabled={busy}
+                />
+                <span>{layout.docImageMaxWidthPx}px</span>
+              </label>
+              <label className="modal__field export-dialog__range">
+                Max image width (PDF, pt)
+                <input
+                  type="range"
+                  min={200}
+                  max={520}
+                  step={10}
+                  value={layout.pdfImageMaxWidthPt}
+                  onChange={(e) =>
+                    setLayout((L) => ({
+                      ...L,
+                      pdfImageMaxWidthPt: Number(e.target.value),
+                    }))
+                  }
+                  disabled={busy}
+                />
+                <span>{layout.pdfImageMaxWidthPt}pt</span>
+              </label>
+              <label className="modal__field export-dialog__range">
+                Word body text (half-points)
+                <input
+                  type="range"
+                  min={18}
+                  max={40}
+                  step={1}
+                  value={layout.docBodyHalfPoints}
+                  onChange={(e) =>
+                    setLayout((L) => ({
+                      ...L,
+                      docBodyHalfPoints: Number(e.target.value),
+                    }))
+                  }
+                  disabled={busy}
+                />
+                <span>
+                  {layout.docBodyHalfPoints} ({layout.docBodyHalfPoints / 2}pt)
+                </span>
+              </label>
+              <fieldset className="export-dialog__fieldset export-dialog__fieldset--inline">
+                <legend className="export-dialog__legend">Each step</legend>
+                <label className="export-dialog__radio">
+                  <input
+                    type="radio"
+                    name="step-order"
+                    checked={layout.stepContentOrder === 'image-first'}
+                    onChange={() =>
+                      setLayout((L) => ({ ...L, stepContentOrder: 'image-first' }))
+                    }
+                    disabled={busy}
+                  />
+                  Image first, then instructions
+                </label>
+                <label className="export-dialog__radio">
+                  <input
+                    type="radio"
+                    name="step-order"
+                    checked={layout.stepContentOrder === 'text-first'}
+                    onChange={() =>
+                      setLayout((L) => ({ ...L, stepContentOrder: 'text-first' }))
+                    }
+                    disabled={busy}
+                  />
+                  Instructions first, then image
+                </label>
+              </fieldset>
+              <label className="modal__field">
+                PDF page size
+                <select
+                  className="modal__input"
+                  value={layout.pdfPageSize}
+                  onChange={(e) =>
+                    setLayout((L) => ({
+                      ...L,
+                      pdfPageSize: e.target.value as 'a4' | 'letter',
+                    }))
+                  }
+                  disabled={busy}
+                >
+                  <option value="a4">A4</option>
+                  <option value="letter">US Letter</option>
+                </select>
+              </label>
+              <label className="modal__field export-dialog__range">
+                PDF margins (pt)
+                <input
+                  type="range"
+                  min={36}
+                  max={72}
+                  step={2}
+                  value={layout.pdfMarginPt}
+                  onChange={(e) =>
+                    setLayout((L) => ({ ...L, pdfMarginPt: Number(e.target.value) }))
+                  }
+                  disabled={busy}
+                />
+                <span>{layout.pdfMarginPt}pt</span>
+              </label>
+              <label className="modal__field export-dialog__range">
+                PDF title (pt)
+                <input
+                  type="range"
+                  min={14}
+                  max={28}
+                  step={1}
+                  value={layout.pdfTitleFontPt}
+                  onChange={(e) =>
+                    setLayout((L) => ({
+                      ...L,
+                      pdfTitleFontPt: Number(e.target.value),
+                    }))
+                  }
+                  disabled={busy}
+                />
+                <span>{layout.pdfTitleFontPt}pt</span>
+              </label>
+              <label className="modal__field export-dialog__range">
+                PDF step heading (pt)
+                <input
+                  type="range"
+                  min={11}
+                  max={22}
+                  step={1}
+                  value={layout.pdfStepHeadingFontPt}
+                  onChange={(e) =>
+                    setLayout((L) => ({
+                      ...L,
+                      pdfStepHeadingFontPt: Number(e.target.value),
+                    }))
+                  }
+                  disabled={busy}
+                />
+                <span>{layout.pdfStepHeadingFontPt}pt</span>
+              </label>
+              <label className="modal__field export-dialog__range">
+                PDF body (pt)
+                <input
+                  type="range"
+                  min={9}
+                  max={16}
+                  step={1}
+                  value={layout.pdfBodyFontPt}
+                  onChange={(e) =>
+                    setLayout((L) => ({ ...L, pdfBodyFontPt: Number(e.target.value) }))
+                  }
+                  disabled={busy}
+                />
+                <span>{layout.pdfBodyFontPt}pt</span>
+              </label>
+            </div>
+
+            {steps.length > 0 ? (
+              <div className="export-dialog__per-step">
+                <p className="export-dialog__per-step-title">Image size per step</p>
+                <p className="muted export-dialog__hint">
+                  Percent of the max width above (steps without images are ignored).
+                </p>
+                <ul className="export-dialog__per-step-list">
+                  {steps.map((s, i) => (
+                    <li key={s.id}>
+                      <span className="export-dialog__per-step-label">
+                        Step {i + 1}
+                        {s.imageId ? '' : ' (no image)'}
+                      </span>
+                      <input
+                        type="range"
+                        min={25}
+                        max={100}
+                        step={5}
+                        disabled={busy || !s.imageId}
+                        value={clampImageScalePct(perStepImagePct[s.id] ?? 100)}
+                        onChange={(e) =>
+                          setPerStepImagePct((prev) => ({
+                            ...prev,
+                            [s.id]: clampImageScalePct(Number(e.target.value)),
+                          }))
+                        }
+                      />
+                      <span>{clampImageScalePct(perStepImagePct[s.id] ?? 100)}%</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </details>
+        ) : null}
 
         <label className="modal__field">
           File name
