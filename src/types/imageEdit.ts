@@ -7,6 +7,8 @@ export type ImageEditLabel = {
   text: string
   fontSizePx: number
   color: string
+  /** Degrees, clockwise; default 0 */
+  rotationDeg?: number
 }
 
 export type ImageEditArrow = {
@@ -31,13 +33,22 @@ export function parseImageEditJson(raw: string | undefined): ImageEditStateV1 | 
   try {
     const o = JSON.parse(raw) as ImageEditStateV1
     if (o?.v !== 1 || typeof o.originalImageId !== 'string' || !o.crop) return null
+    const rawLabels = Array.isArray(o.labels) ? o.labels : []
+    const labels = rawLabels.map((L: unknown) => {
+      const l = L as ImageEditLabel
+      const rotationDeg =
+        typeof l.rotationDeg === 'number' && Number.isFinite(l.rotationDeg)
+          ? l.rotationDeg
+          : 0
+      return { ...l, rotationDeg }
+    })
     return {
       v: 1,
       originalImageId: o.originalImageId,
       crop: o.crop,
       highlights: Array.isArray(o.highlights) ? o.highlights : [],
       arrows: Array.isArray(o.arrows) ? o.arrows : [],
-      labels: Array.isArray(o.labels) ? o.labels : [],
+      labels,
     }
   } catch {
     return null

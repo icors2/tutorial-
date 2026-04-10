@@ -48,6 +48,7 @@ function collectTextRuns(
   root: HTMLElement,
   TextRun: typeof import('docx').TextRun,
   UnderlineType: typeof import('docx').UnderlineType,
+  defaultBodyHalfPoints?: number,
 ): InstanceType<typeof TextRun>[] {
   const runs: InstanceType<typeof TextRun>[] = []
 
@@ -55,6 +56,7 @@ function collectTextRuns(
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent ?? ''
       if (!text) return
+      const size = style.size ?? defaultBodyHalfPoints
       runs.push(
         new TextRun({
           text,
@@ -63,7 +65,7 @@ function collectTextRuns(
           underline: style.underline
             ? { type: UnderlineType.SINGLE }
             : undefined,
-          size: style.size,
+          ...(size !== undefined ? { size } : {}),
         }),
       )
       return
@@ -86,25 +88,85 @@ function collectTextRuns(
   return runs
 }
 
+/** Plain lines for PDF / previews (paragraphs preserved). */
+export function instructionHtmlToPlainLines(text: string): string[] {
+  const raw = text ?? ''
+  const trimmed = raw.trim()
+  if (!trimmed) return ['']
+
+  if (!trimmed.startsWith('<')) {
+    return raw.split('\n').map((line) => line.replace(/\s+/g, ' ').trim())
+  }
+
+  const clean = sanitizeInstructionHtml(raw)
+  const doc = new DOMParser().parseFromString(
+    `<div id="root">${clean}</div>`,
+    'text/html',
+  )
+  const root = doc.getElementById('root')
+  if (!root) {
+    const t = trimmed.replace(/\s+/g, ' ').trim()
+    return t ? [t] : ['']
+  }
+
+  const lines: string[] = []
+  root.childNodes.forEach((child) => {
+    if (child.nodeType === Node.TEXT_NODE) {
+      const t = (child.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (t) lines.push(t)
+      return
+    }
+    if (child.nodeType !== Node.ELEMENT_NODE) return
+    const el = child as HTMLElement
+    const tag = el.tagName.toLowerCase()
+    if (tag === 'p') {
+      const t = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+      lines.push(t)
+    } else if (tag === 'br') {
+      lines.push('')
+    } else {
+      const t = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (t) lines.push(t)
+    }
+  })
+
+  if (lines.length === 0) {
+    const t = (root.textContent ?? '').replace(/\s+/g, ' ').trim()
+    return t ? [t] : ['']
+  }
+  return lines
+}
+
+type DocxParaOpts = { defaultBodyHalfPoints?: number }
+
 /** Builds docx paragraphs from stored instruction HTML or legacy plain text. */
 export function instructionHtmlToDocxParagraphs(
   text: string,
   Paragraph: typeof import('docx').Paragraph,
   TextRun: typeof import('docx').TextRun,
   UnderlineType: typeof import('docx').UnderlineType,
+  opts?: DocxParaOpts,
 ): Paragraph[] {
   const raw = text ?? ''
   const trimmed = raw.trim()
   if (!trimmed) {
-    return [new Paragraph({ children: [new TextRun('')] })]
+    const d = opts?.defaultBodyHalfPoints
+    return [
+      new Paragraph({
+        children: [new TextRun(d !== undefined ? { text: '', size: d } : { text: '' })],
+      }),
+    ]
   }
 
   if (!trimmed.startsWith('<')) {
     const lines = raw.split('\n')
+    const d = opts?.defaultBodyHalfPoints
     return lines.map(
       (line) =>
         new Paragraph({
-          children: [new TextRun(line)],
+          children: [
+            new TextRun(d !== undefined ? { text: line, size: d } : { text: line }),
+          ],
         }),
     )
   }
@@ -122,7 +184,12 @@ export function instructionHtmlToDocxParagraphs(
   const out: Paragraph[] = []
 
   function paragraphFromElement(el: HTMLElement): Paragraph {
-    const runs = collectTextRuns(el, TextRun, UnderlineType)
+    const runs = collectTextRuns(
+      el,
+      TextRun,
+      UnderlineType,
+      opts?.defaultBodyHalfPoints,
+    )
     return new Paragraph({
       children: runs.length ? runs : [new TextRun('')],
     })

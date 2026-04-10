@@ -5,9 +5,10 @@ import { paintAnnotationsOnCroppedContext } from '../services/imageEditComposite
 import type { ImageEditArrow, ImageEditLabel, ImageEditStateV1 } from '../types/imageEdit'
 import {
   clamp,
+  getRotatedLabelAabb,
   hitTestLabelId,
   measureLabelBounds,
-  measureLabelBoundsDisplay,
+  measureLabelTextBox,
 } from '../utils/labelBounds'
 import { getCroppedCanvas } from '../utils/cropImage'
 
@@ -138,11 +139,20 @@ function AnnotateLayer({
     if (selectedLabelId) {
       const L = labels.find((l) => l.id === selectedLabelId)
       if (L) {
-        const b = measureLabelBoundsDisplay(L, sc)
+        const x = L.x * sc
+        const y = L.y * sc
+        const fs = Math.max(8, L.fontSizePx * sc)
+        const { w, h } = measureLabelTextBox({ ...L, x: 0, y: 0, fontSizePx: fs })
+        const box = getRotatedLabelAabb(x, y, w, h, L.rotationDeg ?? 0)
         ctx.strokeStyle = 'rgba(0, 180, 255, 0.95)'
         ctx.lineWidth = 2
         ctx.setLineDash([4, 3])
-        ctx.strokeRect(b.x - 3, b.y - 3, b.w + 6, b.h + 6)
+        ctx.strokeRect(
+          box.minX - 3,
+          box.minY - 3,
+          box.maxX - box.minX + 6,
+          box.maxY - box.minY + 6,
+        )
         ctx.setLineDash([])
       }
     }
@@ -186,8 +196,8 @@ function AnnotateLayer({
     <div className="image-editor__annotate">
       <p className="image-editor__hint">
         Highlight: drag a box. Arrow: drag from tail to tip. Text: tap to place new text. Select &amp;
-        move: choose “Select text”, then drag a label (or pick one in the list). Adjust size with the
-        number field for each text row.
+        move: choose “Select text”, then drag a label (or pick one in the list). Adjust size and
+        rotation for the selected text row.
       </p>
       <canvas
         ref={canvasRef}
@@ -269,6 +279,7 @@ function AnnotateLayer({
                 text: text.trim(),
                 fontSizePx: Math.max(14, Math.round(Math.min(nw, nh) / 28)),
                 color: '#ffffff',
+                rotationDeg: 0,
               },
             ])
             return
@@ -356,6 +367,28 @@ function AnnotateLayer({
                       )
                     }}
                   />
+                </label>
+                <label className="image-editor__label-rotate">
+                  Rotate (°)
+                  <input
+                    type="range"
+                    min={-180}
+                    max={180}
+                    step={1}
+                    value={Math.round(L.rotationDeg ?? 0)}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      if (!Number.isFinite(v)) return
+                      onLabelsChange(
+                        labels.map((x) =>
+                          x.id === L.id ? { ...x, rotationDeg: clamp(v, -180, 180) } : x,
+                        ),
+                      )
+                    }}
+                  />
+                  <span className="image-editor__label-rotate-value">
+                    {Math.round(L.rotationDeg ?? 0)}°
+                  </span>
                 </label>
                 <button type="button" className="btn btn--ghost" onClick={() => editLabel(i)}>
                   Edit text

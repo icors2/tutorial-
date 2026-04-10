@@ -53,6 +53,9 @@ function drawArrow(
 function drawLabels(ctx: CanvasRenderingContext2D, labels: ImageEditLabel[]) {
   for (const L of labels) {
     const px = Math.max(10, L.fontSizePx)
+    ctx.save()
+    ctx.translate(L.x, L.y)
+    ctx.rotate(((L.rotationDeg ?? 0) * Math.PI) / 180)
     ctx.font = getLabelFontSpec(px)
     ctx.textBaseline = 'top'
     const strokeW = Math.max(2, px / 10)
@@ -60,9 +63,10 @@ function drawLabels(ctx: CanvasRenderingContext2D, labels: ImageEditLabel[]) {
     ctx.lineWidth = strokeW
     ctx.lineJoin = 'round'
     ctx.miterLimit = 2
-    ctx.strokeText(L.text, L.x, L.y)
+    ctx.strokeText(L.text, 0, 0)
     ctx.fillStyle = L.color || '#fff'
-    ctx.fillText(L.text, L.x, L.y)
+    ctx.fillText(L.text, 0, 0)
+    ctx.restore()
   }
 }
 

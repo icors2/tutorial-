@@ -1,29 +1,19 @@
 import type { StepRecord } from '../db/schema'
 import { getImage } from '../db/schema'
+import type {
+  ExportFormat,
+  PerStepImageScalePct,
+  TutorialExportLayout,
+} from '../types/exportLayout'
+import { stepImageWidthFactor } from '../types/exportLayout'
 import { instructionHtmlToDocxParagraphs } from './richText'
 
-const DOC_IMAGE_MAX_WIDTH = 600
-
-function slugifyFilename(title: string): string {
-  const base = title
-    .trim()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .slice(0, 80)
-  return base || 'tutorial'
-}
-
-export function defaultExportFilename(title: string): string {
-  return `${slugifyFilename(title)}.docx`
-}
-
-async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
+export async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
   const buf = await blob.arrayBuffer()
   return new Uint8Array(buf)
 }
 
-async function jpegDimensions(data: Uint8Array): Promise<{ w: number; h: number }> {
+export async function jpegDimensions(data: Uint8Array): Promise<{ w: number; h: number }> {
   const copy = new Uint8Array(data.byteLength)
   copy.set(data)
   const blob = new Blob([copy], { type: 'image/jpeg' })
@@ -35,9 +25,26 @@ async function jpegDimensions(data: Uint8Array): Promise<{ w: number; h: number 
   }
 }
 
+function slugifyFilename(title: string): string {
+  const base = title
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 80)
+  return base || 'tutorial'
+}
+
+export function defaultExportFilename(title: string, format: ExportFormat): string {
+  const slug = slugifyFilename(title)
+  return format === 'pdf' ? `${slug}.pdf` : `${slug}.docx`
+}
+
 export async function buildTutorialDocx(
   title: string,
   steps: StepRecord[],
+  layout: TutorialExportLayout,
+  perStepScale: PerStepImageScalePct,
 ): Promise<Blob> {
   const {
     Document,
@@ -68,26 +75,26 @@ export async function buildTutorialDocx(
       }),
     )
 
-    if (step.imageId) {
+    async function imageParagraph(): Promise<InstanceType<typeof Paragraph> | null> {
+      if (!step.imageId) return null
       const rec = await getImage(step.imageId)
-      if (rec) {
-        const raw = await blobToUint8Array(rec.blob)
-        const { w, h } = await jpegDimensions(raw)
-        const scale = Math.min(1, DOC_IMAGE_MAX_WIDTH / w)
-        const tw = Math.max(1, Math.round(w * scale))
-        const th = Math.max(1, Math.round(h * scale))
-        children.push(
-          new Paragraph({
-            children: [
-              new ImageRun({
-                type: 'jpg',
-                data: raw,
-                transformation: { width: tw, height: th },
-              }),
-            ],
+      if (!rec) return null
+      const raw = await blobToUint8Array(rec.blob)
+      const { w, h } = await jpegDimensions(raw)
+      const factor = stepImageWidthFactor(step.id, perStepScale)
+      const cap = layout.docImageMaxWidthPx * factor
+      const scale = Math.min(1, cap / w)
+      const tw = Math.max(1, Math.round(w * scale))
+      const th = Math.max(1, Math.round(h * scale))
+      return new Paragraph({
+        children: [
+          new ImageRun({
+            type: 'jpg',
+            data: raw,
+            transformation: { width: tw, height: th },
           }),
-        )
-      }
+        ],
+      })
     }
 
     const textParas = instructionHtmlToDocxParagraphs(
@@ -95,8 +102,18 @@ export async function buildTutorialDocx(
       Paragraph,
       TextRun,
       UnderlineType,
+      { defaultBodyHalfPoints: layout.docBodyHalfPoints },
     )
-    children.push(...textParas)
+
+    if (layout.stepContentOrder === 'image-first') {
+      const img = await imageParagraph()
+      if (img) children.push(img)
+      children.push(...textParas)
+    } else {
+      children.push(...textParas)
+      const img = await imageParagraph()
+      if (img) children.push(img)
+    }
   }
 
   const doc = new Document({
@@ -106,11 +123,23 @@ export async function buildTutorialDocx(
   return await Packer.toBlob(doc)
 }
 
-export async function saveDocxFile(
+export async function saveExportBlob(
   blob: Blob,
   filename: string,
+  format: ExportFormat,
 ): Promise<'picker' | 'download'> {
-  const opts = { suggestedName: filename, types: [{ description: 'Word', accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] } }] }
+  const types =
+    format === 'pdf'
+      ? [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }]
+      : [
+          {
+            description: 'Word',
+            accept: {
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+            },
+          },
+        ]
+  const opts = { suggestedName: filename, types }
   if ('showSaveFilePicker' in window) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -130,16 +159,4 @@ export async function saveDocxFile(
   a.click()
   URL.revokeObjectURL(url)
   return 'download'
-}
-
-export async function shareDocxFile(blob: Blob, filename: string): Promise<boolean> {
-  if (!navigator.share) return false
-  const file = new File([blob], filename, {
-    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  })
-  const canFiles =
-    typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })
-  if (!canFiles) return false
-  await navigator.share({ files: [file], title: filename })
-  return true
 }
