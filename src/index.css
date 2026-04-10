@@ -543,6 +543,44 @@ p {
   background: var(--code-bg);
 }
 
+.image-editor__layer-list li.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.image-editor__layer-select {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text-h);
+  flex: 1;
+  min-width: 7rem;
+  padding: 0.15rem 0;
+}
+
+.image-editor__layer-select:hover {
+  text-decoration: underline;
+}
+
+.image-editor__label-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.image-editor__label-size input {
+  width: 3.75rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+}
+
 .step-text-editor {
   border: 1px solid var(--border);
   border-radius: 8px;

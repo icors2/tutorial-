@@ -1,5 +1,6 @@
 import type { Area } from 'react-easy-crop'
 import type { ImageEditArrow, ImageEditLabel, ImageEditStateV1 } from '../types/imageEdit'
+import { getLabelFontSpec } from '../utils/labelBounds'
 
 function loadImageFromBlob(blob: Blob): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -52,7 +53,7 @@ function drawArrow(
 function drawLabels(ctx: CanvasRenderingContext2D, labels: ImageEditLabel[]) {
   for (const L of labels) {
     const px = Math.max(10, L.fontSizePx)
-    ctx.font = `600 ${px}px Inter, system-ui, sans-serif`
+    ctx.font = getLabelFontSpec(px)
     ctx.textBaseline = 'top'
     const strokeW = Math.max(2, px / 10)
     ctx.strokeStyle = '#000'

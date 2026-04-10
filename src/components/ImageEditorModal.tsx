@@ -3,6 +3,12 @@ import Cropper, { type Area } from 'react-easy-crop'
 import 'react-easy-crop/react-easy-crop.css'
 import { paintAnnotationsOnCroppedContext } from '../services/imageEditComposite'
 import type { ImageEditArrow, ImageEditLabel, ImageEditStateV1 } from '../types/imageEdit'
+import {
+  clamp,
+  hitTestLabelId,
+  measureLabelBounds,
+  measureLabelBoundsDisplay,
+} from '../utils/labelBounds'
 import { getCroppedCanvas } from '../utils/cropImage'
 
 export type ImageEditorApplyPayload = {
@@ -30,7 +36,7 @@ type Props = {
 
 type Phase = 'crop' | 'annotate'
 
-type AnnotTool = 'highlight' | 'arrow' | 'text'
+type AnnotTool = 'highlight' | 'arrow' | 'text' | 'select'
 
 type AnnotateLayerProps = {
   source: HTMLCanvasElement
@@ -55,12 +61,16 @@ function AnnotateLayer({
 }: AnnotateLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const dragRef = useRef<{
-    kind: AnnotTool
+    kind: 'highlight' | 'arrow' | 'text'
     sx: number
     sy: number
     ex: number
     ey: number
   } | null>(null)
+  const labelMoveRef = useRef<{ id: string; grabX: number; grabY: number } | null>(
+    null,
+  )
+  const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null)
 
   const nw = source.width
   const nh = source.height
@@ -125,7 +135,18 @@ function AnnotateLayer({
       }
       ctx.setLineDash([])
     }
-  }, [source, nw, nh, dw, dh, scale, highlights, arrows, labels])
+    if (selectedLabelId) {
+      const L = labels.find((l) => l.id === selectedLabelId)
+      if (L) {
+        const b = measureLabelBoundsDisplay(L, sc)
+        ctx.strokeStyle = 'rgba(0, 180, 255, 0.95)'
+        ctx.lineWidth = 2
+        ctx.setLineDash([4, 3])
+        ctx.strokeRect(b.x - 3, b.y - 3, b.w + 6, b.h + 6)
+        ctx.setLineDash([])
+      }
+    }
+  }, [source, nw, nh, dw, dh, scale, highlights, arrows, labels, selectedLabelId])
 
   useEffect(() => {
     redraw()
@@ -164,8 +185,9 @@ function AnnotateLayer({
   return (
     <div className="image-editor__annotate">
       <p className="image-editor__hint">
-        Highlight: drag a box. Arrow: drag from tail to tip. Text: tap where the label should go. Use
-        the list below to remove or edit labels.
+        Highlight: drag a box. Arrow: drag from tail to tip. Text: tap to place new text. Select &amp;
+        move: choose “Select text”, then drag a label (or pick one in the list). Adjust size with the
+        number field for each text row.
       </p>
       <canvas
         ref={canvasRef}
@@ -177,6 +199,18 @@ function AnnotateLayer({
           const t = tool
           e.currentTarget.setPointerCapture(e.pointerId)
           const { x, y } = clientToNatural(e.clientX, e.clientY)
+          if (t === 'select') {
+            const hit = hitTestLabelId(x, y, labels)
+            setSelectedLabelId(hit)
+            if (hit) {
+              const L = labels.find((l) => l.id === hit)
+              if (L) labelMoveRef.current = { id: hit, grabX: x - L.x, grabY: y - L.y }
+            } else {
+              labelMoveRef.current = null
+            }
+            return
+          }
+          labelMoveRef.current = null
           if (t === 'text') {
             dragRef.current = { kind: 'text', sx: x, sy: y, ex: x, ey: y }
             redraw()
@@ -186,15 +220,35 @@ function AnnotateLayer({
           redraw()
         }}
         onPointerMove={(e) => {
+          if (labelMoveRef.current) {
+            const { id, grabX, grabY } = labelMoveRef.current
+            const { x: nx, y: ny } = clientToNatural(e.clientX, e.clientY)
+            const cur = labels.find((l) => l.id === id)
+            if (!cur) return
+            let nlx = nx - grabX
+            let nly = ny - grabY
+            const temp = { ...cur, x: nlx, y: nly }
+            const b = measureLabelBounds(temp)
+            nlx = clamp(nlx, 0, Math.max(0, nw - b.w))
+            nly = clamp(nly, 0, Math.max(0, nh - b.h))
+            onLabelsChange(
+              labels.map((l) => (l.id === id ? { ...l, x: nlx, y: nly } : l)),
+            )
+            return
+          }
           if (!dragRef.current || dragRef.current.kind === 'text') return
           const { x, y } = clientToNatural(e.clientX, e.clientY)
           dragRef.current = { ...dragRef.current, ex: x, ey: y }
           redraw()
         }}
         onPointerUp={(e) => {
+          e.currentTarget.releasePointerCapture(e.pointerId)
+          if (labelMoveRef.current) {
+            labelMoveRef.current = null
+            return
+          }
           const d = dragRef.current
           if (!d) return
-          e.currentTarget.releasePointerCapture(e.pointerId)
           const { x, y } = clientToNatural(e.clientX, e.clientY)
           const ex = x
           const ey = y
@@ -243,6 +297,7 @@ function AnnotateLayer({
           }
         }}
         onPointerCancel={() => {
+          labelMoveRef.current = null
           dragRef.current = null
           redraw()
         }}
@@ -271,12 +326,48 @@ function AnnotateLayer({
               </li>
             ))}
             {labels.map((L, i) => (
-              <li key={L.id}>
-                Text: “{L.text.length > 24 ? `${L.text.slice(0, 24)}…` : L.text}”
-                <button type="button" className="btn btn--ghost" onClick={() => editLabel(i)}>
-                  Edit
+              <li
+                key={L.id}
+                className={selectedLabelId === L.id ? 'is-selected' : undefined}
+              >
+                <button
+                  type="button"
+                  className="image-editor__layer-select"
+                  onClick={() => setSelectedLabelId(L.id)}
+                >
+                  Text: “{L.text.length > 24 ? `${L.text.slice(0, 24)}…` : L.text}”
                 </button>
-                <button type="button" className="btn btn--ghost" onClick={() => removeLabel(i)}>
+                <label className="image-editor__label-size">
+                  Size (px)
+                  <input
+                    type="number"
+                    min={10}
+                    max={220}
+                    step={1}
+                    value={Math.round(L.fontSizePx)}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      if (!Number.isFinite(v)) return
+                      const nv = clamp(v, 10, 220)
+                      onLabelsChange(
+                        labels.map((x) =>
+                          x.id === L.id ? { ...x, fontSizePx: nv } : x,
+                        ),
+                      )
+                    }}
+                  />
+                </label>
+                <button type="button" className="btn btn--ghost" onClick={() => editLabel(i)}>
+                  Edit text
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    removeLabel(i)
+                    if (selectedLabelId === L.id) setSelectedLabelId(null)
+                  }}
+                >
                   Remove
                 </button>
               </li>
@@ -403,14 +494,20 @@ function ImageEditorModalBody({
         <>
           <div className="image-editor__tool-row" role="toolbar" style={{ marginBottom: '0.5rem' }}>
             <span className="image-editor__tool-label">Tool:</span>
-            {(['highlight', 'arrow', 'text'] as const).map((t) => (
+            {(['highlight', 'arrow', 'text', 'select'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
                 className={`btn btn--secondary image-editor__tool-btn${annotTool === t ? ' is-active' : ''}`}
                 onClick={() => setAnnotTool(t)}
               >
-                {t === 'highlight' ? 'Highlight' : t === 'arrow' ? 'Arrow' : 'Text on photo'}
+                {t === 'highlight'
+                  ? 'Highlight'
+                  : t === 'arrow'
+                    ? 'Arrow'
+                    : t === 'text'
+                      ? 'Text on photo'
+                      : 'Select text'}
               </button>
             ))}
           </div>
