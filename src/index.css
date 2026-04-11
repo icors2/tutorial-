@@ -132,6 +132,60 @@ p {
   color: var(--text);
 }
 
+.pwa-install-panel {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  max-width: 36rem;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  background: var(--accent-bg);
+  text-align: left;
+}
+
+.pwa-install-panel--ios {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.pwa-install-panel__logo {
+  flex-shrink: 0;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+  background: var(--bg);
+}
+
+.pwa-install-panel__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.pwa-install-panel__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.pwa-install-panel__text {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.pwa-install-panel__dismiss {
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+}
+
 .dashboard {
   position: relative;
   padding-bottom: 4rem;

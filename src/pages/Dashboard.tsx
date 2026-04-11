@@ -6,6 +6,7 @@ import {
   listTutorials,
   type TutorialRecord,
 } from '../db/schema'
+import { PwaInstallPanel } from '../components/PwaInstallPanel'
 import { importTutorialPackage } from '../services/tutorialPackage'
 
 export function Dashboard() {
@@ -76,6 +77,7 @@ export function Dashboard() {
       <header className="page-header">
         <h1 className="page-header__title">TutoDOC</h1>
         <p className="page-header__subtitle">Tutorial drafts</p>
+        <PwaInstallPanel />
         <div className="dashboard__import-row">
           <input
             ref={importInputRef}
